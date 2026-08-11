@@ -1,6 +1,6 @@
 # PoseSketch 交接文件
 
-最後更新：2026-08-11
+最後更新：2026-08-12
 
 ## 目前目標
 
@@ -18,13 +18,17 @@
 - 已加入可設定的臉部方向箭頭（左／右／上／下）。
 - 已加入身體朝向設定（正面／背面／側面）與 AI 匯出圖的 F/B/S 標記。
 - 已加入躺下、趴下、跳動三個姿勢範本；AI 匯出圖會補上 FACE UP、FACE DOWN、AIRBORNE、接地線與動勢箭頭。
+- 已加入人物整體位移、縮放、旋轉、左右鏡像與複製姿勢控制。
+- 已加入可選的骨長鎖定拖曳，避免調整關節時骨架長度任意變形。
 - 可新增多個火柴人、選取圖層、顯示／隱藏人物。
 - 已加入站立、走路、坐姿、舉手四個姿勢範本。
 - 可調整畫布背景色與畫布比例：1:1、3:4、16:9。
 - 可匯入背景圖片，作為描姿勢的參考。
-- 已實作復原／重做、瀏覽器 localStorage 自動保存。
-- 已實作專案 JSON 匯出／匯入。
-- 已實作一般參考 PNG 與 AI Pose PNG 匯出。
+- 已實作復原／重做、瀏覽器 localStorage metadata 自動保存，以及 IndexedDB 背景圖片保存。
+- 已實作 schemaVersion 2 專案 JSON 匯出／匯入，並支援舊版專案遷移。
+- 已實作一般參考 PNG、AI Pose PNG 與標準化 Pose JSON 匯出。
+- PNG 匯出會依 1:1、3:4、16:9 畫布比例輸出，並可選 1024／1536／2048 px 寬度。
+- 已抽出 `src/pose-types.ts` 與 `src/templates.ts`，並加入 `npm run check:pose` 匯出格式檢查。
 - 已實作畫布縮放與高 DPI Canvas 渲染。
 - 已通過 TypeScript 與 production build。
 
@@ -32,8 +36,12 @@
 
 ```text
 index.html                 頁面入口
-src/main.ts                主要資料模型、Canvas 渲染、互動、匯出
+README.md                 專案說明、使用方式與匯出格式
+src/main.ts                Canvas 渲染、互動、專案流程與匯出
+src/pose-types.ts          姿勢資料型別、關節與骨架常數
+src/templates.ts           基準骨架、姿勢範本與範本定位
 src/styles.css             介面樣式
+scripts/validate-pose-export.mjs  標準 Pose JSON 檢查腳本
 package.json               npm scripts 與依賴
 package-lock.json          npm lockfile
 tsconfig.json              TypeScript 設定
@@ -66,26 +74,30 @@ npm run build
 
 本次已確認 build 成功，產出 `dist/`。
 
+檢查標準 Pose JSON：
+
+```bash
+npm run check:pose -- /path/to/posesketch-pose.json
+```
+
 ## 已做過的互動驗證
 
 - 頁面可以正常載入，主要 UI 與 Canvas 可見。
 - 「新增火柴人」可建立第二個人物並新增圖層。
 - Canvas 初始姿勢可正常渲染。
 - 以瀏覽器控制測試過關節拖曳事件，事件有完成執行。
-- 匯出按鈕點擊後沒有產生 console error。
-- 瀏覽器自動化的 download event 沒有攔截到直接由 `<a download>` 觸發的下載；這不代表程式匯出失敗，搬移後應以實際下載檔案再驗證一次。
-- 最後一次瀏覽器截圖時瀏覽器連線的 native pipe 中斷，尚未重新做最後的視覺回歸測試。
+- 實測 16:9 + 1536 px 輸出為 1536 × 864 PNG。
+- 實測舊版 localStorage 專案可遷移至 schemaVersion 2。
+- 實測範本套用會保留骨盆位置，整體位移與鏡像會反映在 Pose JSON。
+- 實測標準 Pose JSON 通過 `npm run check:pose`。
 
 ## 尚未完成
 
 ### 優先事項：先把 Web MVP 做穩
 
-1. 重新啟動 dev server，確認搬移後路徑能正常啟動。
-2. 測試實際 PNG／JSON 下載檔案。
-3. 測試重新載入／開啟 JSON 後姿勢與圖層是否一致。
-4. 測試背景圖片匯入與專案保存。
-5. 測試 3:4、16:9 畫布比例下的渲染與匯出。
-6. 補上更明確的滑鼠游標狀態與拖曳中的提示。
+1. 補上完整的兩段式 IK，讓手腕／腳踝拖曳時更自然地調整手肘／膝蓋。
+2. 補充 OpenPose／COCO 與特定 ControlNet exporter。
+3. 補上更明確的滑鼠游標狀態與拖曳中的提示。
 
 ### 下一階段：桌面版
 
@@ -106,6 +118,7 @@ npm run build
 
 - `posesketch-reference.png`：一般圖片 AI 參考圖。
 - `posesketch-ai-pose.png`：深色背景、左右肢體配色的姿勢圖。
+- `posesketch-pose.json`：標準化關節與姿態 metadata。
 - `posesketch-project.stickpose.json`：可編輯專案資料。
 
 後續再加入：
@@ -119,21 +132,18 @@ npm run build
 
 ## 目前已知限制
 
-- 關節目前是直接拖曳，尚未加入骨長限制或 two-bone IK。
-- 尚未有完整的人物整體移動／旋轉／縮放控制框。
-- 背景圖片目前只有匯入、透明度與簡單 contain／cover 設計，尚未提供完整的拖曳定位控制。
-- `Pose JSON` 目前是完整專案 JSON，不是正式 COCO／OpenPose 輸出格式。
+- 已有骨長鎖定與整體操作按鈕；尚未加入完整的 two-bone IK 與視覺 bounding box。
+- 背景圖片目前只有匯入、透明度與簡單 contain／cover 設計，尚未提供完整的拖曳定位控制；瀏覽器自動保存已使用 IndexedDB 儲存圖片資料。
+- 標準 Pose JSON 已完成，但尚未輸出正式 COCO／OpenPose 格式。
 - AI Pose PNG 是第一版通用骨架圖，尚未針對特定 ControlNet 模型做顏色與關節順序 adapter。
 - 桌面檔案系統、原生選單、簽章、自動更新都還沒做。
 
 ## 建議續作順序
 
-1. 搬移後執行 `npm install && npm run build`。
-2. 修正並驗證 Web MVP 的匯入／匯出與多比例畫布。
-3. 加入人物整體選取與移動／縮放／旋轉。
-4. 建立 Tauri 2 shell，先做 macOS unsigned internal build。
-5. 用 GitHub Actions 建 macOS／Windows artifacts。
-6. 確定主要 AI 目標平台後，再做對應的 pose exporter。
+1. 補完 two-bone IK 與背景圖片定位控制。
+2. 確定主要 AI 目標平台後，完成對應 pose exporter。
+3. 建立 Tauri 2 shell，先做 macOS unsigned internal build。
+4. 用 GitHub Actions 建 macOS／Windows artifacts。
 
 ## 目前沒有做的事情
 
