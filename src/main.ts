@@ -1,55 +1,22 @@
 import './styles.css';
-
-type JointName =
-  | 'head'
-  | 'neck'
-  | 'shoulderL'
-  | 'elbowL'
-  | 'wristL'
-  | 'shoulderR'
-  | 'elbowR'
-  | 'wristR'
-  | 'pelvis'
-  | 'hipL'
-  | 'kneeL'
-  | 'ankleL'
-  | 'toeL'
-  | 'hipR'
-  | 'kneeR'
-  | 'ankleR'
-  | 'toeR';
-
-type Point = { x: number; y: number };
-type Joints = Record<JointName, Point>;
-type FigureOrientation = 'front' | 'back' | 'side';
-type FigurePose = 'stand' | 'walk' | 'sit' | 'raise' | 'lying' | 'prone' | 'jump';
-type HeadFacing = 'left' | 'right' | 'up' | 'down';
-
-type Figure = {
-  id: string;
-  name: string;
-  joints: Joints;
-  orientation: FigureOrientation;
-  pose: FigurePose;
-  headFacing: HeadFacing;
-  visible: boolean;
-  locked: boolean;
-  color: string;
-  accent: string;
-};
-
-type BackgroundLayer = {
-  dataUrl: string;
-  opacity: number;
-  fit: 'contain' | 'cover';
-};
-
-type PoseProject = {
-  schemaVersion: 1;
-  canvas: { width: number; height: number; backgroundColor: string };
-  figures: Figure[];
-  background?: BackgroundLayer;
-};
+import {
+  BONE_PAIRS,
+  CAMERA_VIEWS,
+  JOINT_NAMES,
+  cameraViewLabels,
+  isCameraView,
+  poseLabels,
+  type BackgroundLayer,
+  type CameraView,
+  type Figure,
+  type FigurePose,
+  type HeadFacing,
+  type JointName,
+  type Joints,
+  type Point,
+  type PoseProject,
+} from './pose-types';
+import { createBaseJoints, createTemplateJoints, isFigurePose, placeTemplateAtFigure } from './templates';
 
 type DrawOptions = {
   showGrid?: boolean;
@@ -58,56 +25,29 @@ type DrawOptions = {
   aiMode?: boolean;
 };
 
-const JOINT_NAMES: JointName[] = [
-  'head', 'neck', 'shoulderL', 'elbowL', 'wristL', 'shoulderR', 'elbowR', 'wristR',
-  'pelvis', 'hipL', 'kneeL', 'ankleL', 'toeL', 'hipR', 'kneeR', 'ankleR', 'toeR',
-];
-
-const BONE_PAIRS: Array<[JointName, JointName, 'center' | 'left' | 'right']> = [
-  ['head', 'neck', 'center'],
-  ['neck', 'shoulderL', 'left'], ['shoulderL', 'elbowL', 'left'], ['elbowL', 'wristL', 'left'],
-  ['neck', 'shoulderR', 'right'], ['shoulderR', 'elbowR', 'right'], ['elbowR', 'wristR', 'right'],
-  ['neck', 'pelvis', 'center'],
-  ['pelvis', 'hipL', 'left'], ['hipL', 'kneeL', 'left'], ['kneeL', 'ankleL', 'left'], ['ankleL', 'toeL', 'left'],
-  ['pelvis', 'hipR', 'right'], ['hipR', 'kneeR', 'right'], ['kneeR', 'ankleR', 'right'], ['ankleR', 'toeR', 'right'],
-  ['shoulderL', 'shoulderR', 'center'], ['hipL', 'hipR', 'center'],
-];
-
 const leftColor = '#f06a5f';
 const rightColor = '#4b8fe8';
 const centerColor = '#27333f';
-const poseLabels: Record<FigurePose, string> = {
-  stand: 'STAND',
-  walk: 'WALK',
-  sit: 'SIT',
-  raise: 'RAISE',
-  lying: 'LYING / FACE UP',
-  prone: 'PRONE / FACE DOWN',
-  jump: 'JUMP / AIRBORNE',
+const cameraColor = '#d9902f';
+const cameraViewUiLabels: Record<CameraView, { title: string; detail: string; surface: string }> = {
+  front: { title: '拍正面', detail: '鏡頭看到胸口', surface: '胸' },
+  back: { title: '拍背面', detail: '鏡頭看到背部', surface: '背' },
+  'left-side': { title: '拍左側', detail: '鏡頭看到人物左側', surface: '左' },
+  'right-side': { title: '拍右側', detail: '鏡頭看到人物右側', surface: '右' },
 };
 const appRoot = document.querySelector<HTMLDivElement>('#app')!;
 
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
-
-function createBaseJoints(offsetX = 0, offsetY = 0, scale = 1): Joints {
-  const p = (x: number, y: number): Point => ({ x: 0.5 + (x - 0.5) * scale + offsetX, y: y * scale + offsetY });
-  return {
-    head: p(0.5, 0.16), neck: p(0.5, 0.25),
-    shoulderL: p(0.43, 0.28), elbowL: p(0.34, 0.39), wristL: p(0.26, 0.49),
-    shoulderR: p(0.57, 0.28), elbowR: p(0.66, 0.39), wristR: p(0.74, 0.49),
-    pelvis: p(0.5, 0.52), hipL: p(0.45, 0.54), kneeL: p(0.42, 0.7), ankleL: p(0.4, 0.88), toeL: p(0.34, 0.9),
-    hipR: p(0.55, 0.54), kneeR: p(0.58, 0.7), ankleR: p(0.6, 0.88), toeR: p(0.66, 0.9),
-  };
-}
 
 function createFigure(index = 0, offsetX = 0, offsetY = 0, scale = 1): Figure {
   return {
     id: crypto.randomUUID(),
     name: `人物 ${index + 1}`,
     joints: createBaseJoints(offsetX, offsetY, scale),
-    orientation: 'front',
+    cameraView: 'front',
     pose: 'stand',
     headFacing: 'right',
+    boneLock: false,
     visible: true,
     locked: false,
     color: centerColor,
@@ -117,7 +57,7 @@ function createFigure(index = 0, offsetX = 0, offsetY = 0, scale = 1): Figure {
 
 function createDefaultProject(): PoseProject {
   return {
-    schemaVersion: 1,
+    schemaVersion: 3,
     canvas: { width: 1024, height: 1024, backgroundColor: '#fbfaf7' },
     figures: [createFigure(0)],
   };
@@ -132,6 +72,8 @@ let historyPast: PoseProject[] = [];
 let historyFuture: PoseProject[] = [];
 let dragStart: PoseProject | null = null;
 let dragMoved = false;
+let dragBoneLengths: Record<string, number> | null = null;
+let exportResolution = 1024;
 
 appRoot.innerHTML = `
   <div class="shell">
@@ -193,7 +135,7 @@ appRoot.innerHTML = `
         <div id="layer-list" class="layer-list"></div>
         <div class="panel-heading section-heading"><span>目前人物</span><span class="eyebrow">INSPECTOR</span></div>
         <div class="inspector" id="inspector"></div>
-        <div class="export-card"><div class="export-card-title"><span class="export-icon">✦</span><div><strong>給 AI 的參考圖</strong><small>只保留姿勢，不含控制點</small></div></div><button class="export-outline" data-action="export-reference">匯出一般參考 PNG <span>↗</span></button><button class="export-outline" data-action="export-json">匯出 Pose JSON <span>↗</span></button></div>
+        <div class="export-card"><div class="export-card-title"><span class="export-icon">✦</span><div><strong>給 AI 的參考圖</strong><small>只保留姿勢，不含控制點</small></div></div><label class="export-resolution">PNG 寬度<select id="export-resolution"><option value="1024">1024 px</option><option value="1536">1536 px</option><option value="2048">2048 px</option></select></label><button class="export-outline" data-action="export-reference">匯出一般參考 PNG <span>↗</span></button><button class="export-outline" data-action="export-pose-reference">匯出 AI 姿勢 PNG <span>↗</span></button><button class="export-outline" data-action="export-json">匯出標準 Pose JSON <span>↗</span></button><button class="export-outline" data-action="export-project-json">匯出專案 JSON <span>↗</span></button></div>
       </aside>
     </main>
     <input id="background-input" type="file" accept="image/*" hidden>
@@ -261,37 +203,156 @@ function redo(): void {
 }
 
 function persistLocal(): void {
+  const snapshot = clone(project);
+  if (snapshot.background) snapshot.background.dataUrl = '';
   try {
-    localStorage.setItem('posesketch:last-project', JSON.stringify(project));
+    localStorage.setItem('posesketch:last-project', JSON.stringify(snapshot));
   } catch {
     // Private browsing or quota errors should not block editing.
   }
+  saveBackgroundAsset(project.background?.dataUrl ?? null);
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null ? value as Record<string, unknown> : null;
+}
+
+function finiteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function readPoint(value: unknown): Point | null {
+  const record = asRecord(value);
+  if (!record || !finiteNumber(record.x) || !finiteNumber(record.y)) return null;
+  return { x: record.x, y: record.y };
+}
+
+function migrateProject(raw: unknown): PoseProject {
+  const record = asRecord(raw);
+  const schemaVersion = record?.schemaVersion;
+  if (!record || (schemaVersion !== 1 && schemaVersion !== 2 && schemaVersion !== 3) || !Array.isArray(record.figures)) {
+    throw new Error('invalid-project');
+  }
+
+  const canvasRecord = asRecord(record.canvas);
+  const width = canvasRecord && finiteNumber(canvasRecord.width) && canvasRecord.width > 0 ? Math.round(canvasRecord.width) : 1024;
+  const height = canvasRecord && finiteNumber(canvasRecord.height) && canvasRecord.height > 0 ? Math.round(canvasRecord.height) : 1024;
+  const backgroundColor = canvasRecord && typeof canvasRecord.backgroundColor === 'string' ? canvasRecord.backgroundColor : '#fbfaf7';
+
+  const figures = record.figures.map((rawFigure, index) => {
+    const figureRecord = asRecord(rawFigure);
+    const jointsRecord = figureRecord ? asRecord(figureRecord.joints) : null;
+    if (!figureRecord || !jointsRecord) throw new Error('invalid-figure');
+    const joints = {} as Joints;
+    for (const jointName of JOINT_NAMES) {
+      const point = readPoint(jointsRecord[jointName]);
+      if (!point) throw new Error('invalid-joints');
+      joints[jointName] = point;
+    }
+
+    const defaults = createFigure(index);
+    const legacyOrientation = figureRecord.orientation;
+    const cameraView: CameraView = isCameraView(figureRecord.cameraView)
+      ? figureRecord.cameraView
+      : legacyOrientation === 'back'
+        ? 'back'
+        : legacyOrientation === 'side'
+          ? 'left-side'
+          : 'front';
+    const pose = figureRecord.pose === 'walk' || figureRecord.pose === 'sit' || figureRecord.pose === 'raise' || figureRecord.pose === 'lying' || figureRecord.pose === 'prone' || figureRecord.pose === 'jump' ? figureRecord.pose : 'stand';
+    const headFacing = figureRecord.headFacing === 'left' || figureRecord.headFacing === 'up' || figureRecord.headFacing === 'down' ? figureRecord.headFacing : 'right';
+    return {
+      ...defaults,
+      id: typeof figureRecord.id === 'string' && figureRecord.id ? figureRecord.id : defaults.id,
+      name: typeof figureRecord.name === 'string' && figureRecord.name ? figureRecord.name : defaults.name,
+      joints,
+      cameraView,
+      pose,
+      headFacing,
+      boneLock: typeof figureRecord.boneLock === 'boolean' ? figureRecord.boneLock : false,
+      visible: typeof figureRecord.visible === 'boolean' ? figureRecord.visible : true,
+      locked: typeof figureRecord.locked === 'boolean' ? figureRecord.locked : false,
+      color: typeof figureRecord.color === 'string' ? figureRecord.color : centerColor,
+      accent: typeof figureRecord.accent === 'string' ? figureRecord.accent : defaults.accent,
+    } satisfies Figure;
+  });
+
+  const backgroundRecord = asRecord(record.background);
+  const background = backgroundRecord && typeof backgroundRecord.dataUrl === 'string'
+    ? {
+        dataUrl: backgroundRecord.dataUrl,
+        opacity: finiteNumber(backgroundRecord.opacity) ? Math.max(0, Math.min(1, backgroundRecord.opacity)) : 0.24,
+        fit: backgroundRecord.fit === 'cover' ? 'cover' as const : 'contain' as const,
+      }
+    : undefined;
+
+  return {
+    schemaVersion: 3,
+    canvas: { width, height, backgroundColor },
+    figures,
+    ...(background ? { background } : {}),
+  };
 }
 
 function normalizeFigureMetadata(): void {
   project.figures.forEach((figure) => {
-    figure.orientation = figure.orientation ?? 'front';
+    figure.cameraView = isCameraView(figure.cameraView) ? figure.cameraView : 'front';
     figure.pose = figure.pose ?? 'stand';
     figure.headFacing = figure.headFacing ?? 'right';
+    figure.boneLock = figure.boneLock ?? false;
   });
+  project.schemaVersion = 3;
 }
 
 function setFigurePose(figure: Figure, pose: FigurePose): void {
   figure.pose = pose;
   if (pose === 'lying' || pose === 'prone') {
-    figure.orientation = 'side';
+    figure.cameraView = 'left-side';
     figure.headFacing = 'left';
   }
 }
 
-function restoreLocal(): void {
+function openAssetDatabase(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    if (!('indexedDB' in window)) { reject(new Error('indexeddb-unavailable')); return; }
+    const request = window.indexedDB.open('posesketch-assets', 1);
+    request.onupgradeneeded = () => request.result.createObjectStore('assets');
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error ?? new Error('indexeddb-open-failed'));
+  });
+}
+
+function saveBackgroundAsset(dataUrl: string | null): void {
+  void openAssetDatabase().then((database) => {
+    const transaction = database.transaction('assets', 'readwrite');
+    const store = transaction.objectStore('assets');
+    if (dataUrl) store.put(dataUrl, 'background');
+    else store.delete('background');
+    transaction.oncomplete = () => database.close();
+    transaction.onerror = () => database.close();
+  }).catch(() => {
+    // localStorage remains the metadata fallback when IndexedDB is unavailable.
+  });
+}
+
+function readBackgroundAsset(): Promise<string | null> {
+  return openAssetDatabase().then((database) => new Promise<string | null>((resolve, reject) => {
+    const request = database.transaction('assets', 'readonly').objectStore('assets').get('background');
+    request.onsuccess = () => { database.close(); resolve(typeof request.result === 'string' ? request.result : null); };
+    request.onerror = () => { database.close(); reject(request.error ?? new Error('indexeddb-read-failed')); };
+  })).catch(() => null);
+}
+
+async function restoreLocal(): Promise<void> {
   try {
     const raw = localStorage.getItem('posesketch:last-project');
     if (!raw) return;
-    const saved = JSON.parse(raw) as PoseProject;
-    if (saved?.schemaVersion !== 1 || !Array.isArray(saved.figures)) return;
+    const saved = migrateProject(JSON.parse(raw));
     Object.assign(project, saved);
     normalizeFigureMetadata();
+    if (project.background && !project.background.dataUrl) {
+      project.background.dataUrl = await readBackgroundAsset() ?? '';
+    }
     selectedFigureId = project.figures[0]?.id ?? '';
   } catch {
     // Ignore an invalid local snapshot.
@@ -487,7 +548,109 @@ function drawAiPoseCue(context: CanvasRenderingContext2D, figure: Figure, point:
   context.restore();
 }
 
-function drawAiOrientationCue(context: CanvasRenderingContext2D, figure: Figure, point: (joint: JointName) => Point, width: number): void {
+function drawCameraIcon(context: CanvasRenderingContext2D, center: Point, size: number, color: string): void {
+  const bodyWidth = size * 1.55;
+  const bodyHeight = size * 0.95;
+  context.save();
+  context.strokeStyle = color;
+  context.fillStyle = color;
+  context.lineWidth = Math.max(2, size * 0.14);
+  context.lineJoin = 'round';
+  context.strokeRect(center.x - bodyWidth / 2, center.y - bodyHeight / 2, bodyWidth, bodyHeight);
+  context.beginPath();
+  context.arc(center.x, center.y, size * 0.25, 0, Math.PI * 2);
+  context.stroke();
+  context.fillRect(center.x - bodyWidth * 0.28, center.y - bodyHeight * 0.75, bodyWidth * 0.38, bodyHeight * 0.25);
+  context.restore();
+}
+
+function drawCameraDirectionCue(
+  context: CanvasRenderingContext2D,
+  figure: Figure,
+  point: (joint: JointName) => Point,
+  width: number,
+  height: number,
+  aiMode: boolean,
+): void {
+  const view = isCameraView(figure.cameraView) ? figure.cameraView : 'front';
+  const metadata = cameraViewLabels[view];
+  const ui = cameraViewUiLabels[view];
+  const points = JOINT_NAMES.map((jointName) => point(jointName));
+  const minX = Math.min(...points.map(({ x }) => x));
+  const maxX = Math.max(...points.map(({ x }) => x));
+  const minY = Math.min(...points.map(({ y }) => y));
+  const maxY = Math.max(...points.map(({ y }) => y));
+  const shoulderL = point('shoulderL');
+  const shoulderR = point('shoulderR');
+  const pelvis = point('pelvis');
+  const target = {
+    x: (shoulderL.x + shoulderR.x) / 2,
+    y: (shoulderL.y + shoulderR.y) / 2 + (pelvis.y - (shoulderL.y + shoulderR.y) / 2) * 0.24,
+  };
+  const size = Math.max(aiMode ? 14 : 11, width / (aiMode ? 72 : 92));
+  const margin = size * 1.35;
+  const cameraOnRight = view === 'back' || view === 'right-side';
+  const sideView = view === 'left-side' || view === 'right-side';
+  const desiredSideSpace = size * 4.8;
+  const availableSideSpace = cameraOnRight ? width - maxX : minX;
+  let preferredX = cameraOnRight ? maxX + size * 3.2 : minX - size * 3.2;
+  let preferredY = sideView ? target.y : minY - size * 1.9;
+  if (availableSideSpace < desiredSideSpace) {
+    const bottomSpace = height - maxY;
+    const topSpace = minY;
+    if (bottomSpace >= topSpace) {
+      preferredX = cameraOnRight ? maxX - size * 1.2 : minX + size * 1.2;
+      preferredY = maxY + size * 2.9;
+    } else {
+      preferredX = cameraOnRight ? maxX - size * 1.2 : minX + size * 1.2;
+      preferredY = minY - size * 2.9;
+    }
+  }
+  const camera = {
+    x: Math.max(margin, Math.min(width - margin, preferredX)),
+    y: Math.max(margin * 1.25, Math.min(height - margin * 1.25, preferredY)),
+  };
+  const dx = target.x - camera.x;
+  const dy = target.y - camera.y;
+  const length = Math.max(1, Math.hypot(dx, dy));
+  const rayStart = { x: camera.x + dx / length * size, y: camera.y + dy / length * size };
+  const color = aiMode ? '#58d5c8' : cameraColor;
+  const label = aiMode ? `CAMERA ${metadata.title} / ${metadata.surface}` : `鏡頭 ${ui.title}・${ui.surface}`;
+
+  context.save();
+  context.strokeStyle = color;
+  context.fillStyle = color;
+  context.lineWidth = Math.max(2, size * 0.13);
+  context.setLineDash([size * 0.45, size * 0.28]);
+  context.beginPath();
+  context.moveTo(rayStart.x, rayStart.y);
+  context.lineTo(target.x, target.y);
+  context.stroke();
+  context.setLineDash([]);
+  drawArrowHead(context, rayStart, target, color, size * 0.58);
+  drawCameraIcon(context, camera, size, color);
+
+  const fontSize = Math.max(aiMode ? 14 : 10, width / (aiMode ? 70 : 96));
+  context.font = `800 ${fontSize}px -apple-system, BlinkMacSystemFont, sans-serif`;
+  const paddingX = size * 0.42;
+  const badgeWidth = context.measureText(label).width + paddingX * 2;
+  const badgeHeight = fontSize * 1.65;
+  const badgeX = Math.max(size * 0.55, Math.min(width - badgeWidth - size * 0.55, camera.x - badgeWidth / 2));
+  const labelBelowCamera = camera.y >= target.y;
+  const preferredBadgeY = labelBelowCamera ? camera.y + size * 1.05 : camera.y - size * 1.05 - badgeHeight;
+  const badgeY = Math.max(size * 0.55, Math.min(height - badgeHeight - size * 0.55, preferredBadgeY));
+  context.fillStyle = aiMode ? 'rgba(29, 37, 45, .94)' : 'rgba(251, 250, 247, .94)';
+  context.fillRect(badgeX, badgeY, badgeWidth, badgeHeight);
+  context.strokeStyle = color;
+  context.strokeRect(badgeX, badgeY, badgeWidth, badgeHeight);
+  context.fillStyle = color;
+  context.textAlign = 'center';
+  context.textBaseline = 'middle';
+  context.fillText(label, badgeX + badgeWidth / 2, badgeY + badgeHeight / 2);
+  context.restore();
+}
+
+function drawAiCameraSurfaceCue(context: CanvasRenderingContext2D, figure: Figure, point: (joint: JointName) => Point, width: number): void {
   const shoulderL = point('shoulderL');
   const shoulderR = point('shoulderR');
   const pelvis = point('pelvis');
@@ -497,36 +660,39 @@ function drawAiOrientationCue(context: CanvasRenderingContext2D, figure: Figure,
     y: shoulderCenter.y + (pelvis.y - shoulderCenter.y) * 0.22,
   };
   const size = Math.max(16, width / 56);
-  const orientation = figure.orientation ?? 'front';
-  const label = orientation === 'front' ? 'F' : orientation === 'back' ? 'B' : 'S';
+  const cameraView = isCameraView(figure.cameraView) ? figure.cameraView : 'front';
+  const label = cameraViewLabels[cameraView].short;
 
   context.save();
   context.strokeStyle = '#ffd166';
   context.fillStyle = '#ffd166';
   context.lineWidth = Math.max(3, width / 260);
   context.lineCap = 'round';
-  if (orientation === 'front') {
+  if (cameraView === 'front') {
     context.beginPath(); context.arc(chest.x, chest.y, size * 0.72, 0, Math.PI * 2); context.stroke();
     context.beginPath(); context.arc(chest.x, chest.y, size * 0.18, 0, Math.PI * 2); context.fill();
     context.beginPath(); context.moveTo(chest.x - size * 1.15, chest.y); context.lineTo(chest.x + size * 1.15, chest.y); context.stroke();
-  } else if (orientation === 'back') {
+  } else if (cameraView === 'back') {
     context.beginPath(); context.arc(chest.x - size * 0.58, chest.y, size * 0.46, -Math.PI / 2, Math.PI / 2); context.stroke();
     context.beginPath(); context.arc(chest.x + size * 0.58, chest.y, size * 0.46, Math.PI / 2, Math.PI * 1.5); context.stroke();
     context.setLineDash([size * 0.35, size * 0.22]);
     context.beginPath(); context.moveTo(chest.x, chest.y - size * 0.9); context.lineTo(chest.x, chest.y + size * 0.9); context.stroke();
     context.setLineDash([]);
   } else {
+    const direction = cameraView === 'left-side' ? 1 : -1;
     context.beginPath();
-    context.moveTo(chest.x + size, chest.y);
-    context.lineTo(chest.x - size * 0.72, chest.y - size * 0.72);
-    context.lineTo(chest.x - size * 0.72, chest.y + size * 0.72);
+    context.moveTo(chest.x + size * direction, chest.y);
+    context.lineTo(chest.x - size * 0.72 * direction, chest.y - size * 0.72);
+    context.lineTo(chest.x - size * 0.72 * direction, chest.y + size * 0.72);
     context.closePath();
     context.fill();
   }
   context.font = `800 ${Math.max(20, width / 46)}px -apple-system, BlinkMacSystemFont, sans-serif`;
   context.textAlign = 'left';
   context.textBaseline = 'middle';
-  context.fillText(label, chest.x + size * 1.55, chest.y);
+  const labelX = cameraView === 'right-side' ? chest.x - size * 1.55 : chest.x + size * 1.55;
+  context.textAlign = cameraView === 'right-side' ? 'right' : 'left';
+  context.fillText(label, labelX, chest.y);
   context.restore();
 }
 
@@ -539,7 +705,7 @@ function drawAiLegend(context: CanvasRenderingContext2D, width: number): void {
   context.textBaseline = 'top';
   const x = width / 38;
   const y = width / 38;
-  context.fillText('L/R = limb side   F/B/S = torso facing', x, y);
+  context.fillText('CAMERA F/B/L/R = front, back, left side, right side', x, y);
   context.fillText('POSE: LYING face up   PRONE face down   JUMP airborne   arrows = head + toe', x, y + fontSize * 1.45);
   context.restore();
 }
@@ -572,10 +738,13 @@ function drawFigure(context: CanvasRenderingContext2D, figure: Figure, width: nu
   drawHeadDirectionCue(context, head, headRadius, figure.headFacing ?? 'right', Boolean(options.aiMode));
 
   if (options.aiMode) {
-    drawAiOrientationCue(context, figure, point, width);
+    drawCameraDirectionCue(context, figure, point, width, height, true);
+    drawAiCameraSurfaceCue(context, figure, point, width);
     drawAiPoseCue(context, figure, point, width, height);
     drawFootDirectionCue(context, point('ankleL'), point('toeL'), 'L', width);
     drawFootDirectionCue(context, point('ankleR'), point('toeR'), 'R', width);
+  } else if (options.showHandles && isSelected) {
+    drawCameraDirectionCue(context, figure, point, width, height, false);
   }
 
   if (options.showHandles && isSelected) {
@@ -633,6 +802,17 @@ function renderLayers(): void {
 function renderInspector(): void {
   const figure = selectedFigure();
   if (!figure) { inspector.innerHTML = '<p class="muted-copy">尚未選取人物</p>'; return; }
+  const currentCameraView = isCameraView(figure.cameraView) ? figure.cameraView : 'front';
+  const cameraViewCards = CAMERA_VIEWS.map((view) => {
+    const label = cameraViewUiLabels[view];
+    const reverse = view === 'back' || view === 'right-side';
+    return `
+      <button type="button" class="camera-view-card ${currentCameraView === view ? 'active' : ''}" data-camera-view="${view}" role="radio" aria-checked="${currentCameraView === view}" ${figure.locked ? 'disabled' : ''}>
+        <span class="camera-view-visual ${reverse ? 'reverse' : ''}" aria-hidden="true"><i class="mini-camera"></i><i class="mini-camera-ray">→</i><b>${label.surface}</b></span>
+        <strong>${label.title}</strong><small>${label.detail}</small>
+      </button>
+    `;
+  }).join('');
   inspector.innerHTML = `
     <label class="field-label">名稱<input id="figure-name" type="text" value="${escapeAttr(figure.name)}"></label>
     <label class="field-label">姿態<select id="figure-pose">
@@ -644,11 +824,11 @@ function renderInspector(): void {
       <option value="prone" ${(figure.pose ?? 'stand') === 'prone' ? 'selected' : ''}>趴下 PRONE / FACE DOWN</option>
       <option value="jump" ${(figure.pose ?? 'stand') === 'jump' ? 'selected' : ''}>跳動 JUMP / AIRBORNE</option>
     </select></label>
-    <label class="field-label">身體朝向<select id="figure-orientation">
-      <option value="front" ${(figure.orientation ?? 'front') === 'front' ? 'selected' : ''}>正面 FRONT</option>
-      <option value="back" ${(figure.orientation ?? 'front') === 'back' ? 'selected' : ''}>背面 BACK</option>
-      <option value="side" ${(figure.orientation ?? 'front') === 'side' ? 'selected' : ''}>側面 SIDE</option>
-    </select></label>
+    <div class="camera-view-field">
+      <div class="camera-view-heading"><span>鏡頭拍攝方向</span><small>鏡頭會看到人物哪一面</small></div>
+      <div class="camera-view-grid" role="radiogroup" aria-label="鏡頭拍攝方向">${cameraViewCards}</div>
+      <div class="camera-view-summary"><i class="mini-camera"></i><span>${cameraViewUiLabels[currentCameraView].detail}</span></div>
+    </div>
     <label class="field-label">頭部方向<select id="figure-head-facing">
       <option value="left" ${(figure.headFacing ?? 'right') === 'left' ? 'selected' : ''}>左 LEFT</option>
       <option value="right" ${(figure.headFacing ?? 'right') === 'right' ? 'selected' : ''}>右 RIGHT</option>
@@ -657,20 +837,38 @@ function renderInspector(): void {
     </select></label>
     <div class="inspector-row"><span>線條顏色</span><input id="figure-color" type="color" value="${figure.color}"></div>
     <label class="toggle-row"><span>鎖定人物</span><input id="figure-locked" type="checkbox" ${figure.locked ? 'checked' : ''}><i></i></label>
+    <label class="toggle-row"><span>鎖定骨長</span><input id="figure-bone-lock" type="checkbox" ${figure.boneLock ? 'checked' : ''}><i></i></label>
+    <div class="transform-panel">
+      <div class="inspector-subheading">整體操作</div>
+      <div class="transform-grid move-grid"><span></span><button data-transform="move-up" title="整體上移">↑</button><span></span><button data-transform="move-left" title="整體左移">←</button><button data-transform="move-down" title="整體下移">↓</button><button data-transform="move-right" title="整體右移">→</button></div>
+      <div class="transform-grid"><button data-transform="rotate-left" title="逆時針旋轉">↺</button><button data-transform="scale-down" title="縮小人物">−</button><button data-transform="scale-up" title="放大人物">＋</button><button data-transform="rotate-right" title="順時針旋轉">↻</button></div>
+      <div class="transform-actions"><button data-transform="mirror">左右鏡像</button><button data-transform="duplicate">複製人物</button></div>
+    </div>
     <div class="legend-row"><span><i class="dot left-dot"></i>左側肢體</span><span><i class="dot right-dot"></i>右側肢體</span></div>
   `;
   const nameInput = document.querySelector<HTMLInputElement>('#figure-name');
   const poseInput = document.querySelector<HTMLSelectElement>('#figure-pose');
-  const orientationInput = document.querySelector<HTMLSelectElement>('#figure-orientation');
   const headFacingInput = document.querySelector<HTMLSelectElement>('#figure-head-facing');
   const colorInput = document.querySelector<HTMLInputElement>('#figure-color');
   const lockedInput = document.querySelector<HTMLInputElement>('#figure-locked');
+  const boneLockInput = document.querySelector<HTMLInputElement>('#figure-bone-lock');
   nameInput?.addEventListener('change', () => { commit(); figure.name = nameInput.value.trim() || '未命名人物'; renderAll(); persistLocal(); });
   poseInput?.addEventListener('change', () => { commit(); setFigurePose(figure, poseInput.value as FigurePose); renderAll(); persistLocal(); });
-  orientationInput?.addEventListener('change', () => { commit(); figure.orientation = orientationInput.value as FigureOrientation; renderAll(); persistLocal(); });
+  inspector.querySelectorAll<HTMLButtonElement>('[data-camera-view]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const nextView = button.dataset.cameraView;
+      if (!isCameraView(nextView) || nextView === figure.cameraView || figure.locked) return;
+      commit();
+      figure.cameraView = nextView;
+      renderAll();
+      persistLocal();
+      showToast(`鏡頭方向：${cameraViewUiLabels[nextView].detail}`);
+    });
+  });
   headFacingInput?.addEventListener('change', () => { commit(); figure.headFacing = headFacingInput.value as HeadFacing; renderAll(); persistLocal(); });
   colorInput?.addEventListener('change', () => { commit(); figure.color = colorInput.value; renderAll(); persistLocal(); });
   lockedInput?.addEventListener('change', () => { commit(); figure.locked = lockedInput.checked; renderAll(); persistLocal(); });
+  boneLockInput?.addEventListener('change', () => { commit(); figure.boneLock = boneLockInput.checked; renderAll(); persistLocal(); });
 }
 
 function syncAspectChips(): void {
@@ -715,6 +913,127 @@ function hitTest(point: Point): JointName | null {
   return closest;
 }
 
+function applyFigureTransform(figure: Figure, action: string): void {
+  const pivot = figure.joints.pelvis;
+  let dx = 0;
+  let dy = 0;
+  let scale = 1;
+  let rotation = 0;
+  if (action === 'move-up') dy = -0.02;
+  if (action === 'move-down') dy = 0.02;
+  if (action === 'move-left') dx = -0.02;
+  if (action === 'move-right') dx = 0.02;
+  if (action === 'scale-up') scale = 1.06;
+  if (action === 'scale-down') scale = 0.94;
+  if (action === 'rotate-left') rotation = -Math.PI / 36;
+  if (action === 'rotate-right') rotation = Math.PI / 36;
+  const cosine = Math.cos(rotation);
+  const sine = Math.sin(rotation);
+  for (const jointName of JOINT_NAMES) {
+    const point = figure.joints[jointName];
+    const relativeX = (point.x - pivot.x) * scale;
+    const relativeY = (point.y - pivot.y) * scale;
+    figure.joints[jointName] = {
+      x: pivot.x + relativeX * cosine - relativeY * sine + dx,
+      y: pivot.y + relativeX * sine + relativeY * cosine + dy,
+    };
+  }
+}
+
+function mirrorFigure(figure: Figure): void {
+  const pivot = figure.joints.pelvis;
+  const original = clone(figure.joints);
+  const centerJoints: JointName[] = ['head', 'neck', 'pelvis'];
+  const mirrorPairs: Array<[JointName, JointName]> = [
+    ['shoulderL', 'shoulderR'], ['elbowL', 'elbowR'], ['wristL', 'wristR'],
+    ['hipL', 'hipR'], ['kneeL', 'kneeR'], ['ankleL', 'ankleR'], ['toeL', 'toeR'],
+  ];
+  for (const jointName of centerJoints) {
+    figure.joints[jointName] = { x: pivot.x - (original[jointName].x - pivot.x), y: original[jointName].y };
+  }
+  for (const [leftName, rightName] of mirrorPairs) {
+    figure.joints[leftName] = { x: pivot.x - (original[rightName].x - pivot.x), y: original[rightName].y };
+    figure.joints[rightName] = { x: pivot.x - (original[leftName].x - pivot.x), y: original[leftName].y };
+  }
+  if (figure.headFacing === 'left') figure.headFacing = 'right';
+  else if (figure.headFacing === 'right') figure.headFacing = 'left';
+  if (figure.cameraView === 'left-side') figure.cameraView = 'right-side';
+  else if (figure.cameraView === 'right-side') figure.cameraView = 'left-side';
+}
+
+function duplicateFigure(): void {
+  const source = selectedFigure();
+  if (!source || source.locked) return;
+  commit();
+  const copy = clone(source);
+  copy.id = crypto.randomUUID();
+  copy.name = `${source.name} 複製`;
+  copy.locked = false;
+  copy.visible = true;
+  const shift = 0.08;
+  copy.joints = Object.fromEntries(JOINT_NAMES.map((jointName) => [jointName, {
+    x: copy.joints[jointName].x + shift,
+    y: copy.joints[jointName].y,
+  }])) as Joints;
+  project.figures.push(copy);
+  selectedFigureId = copy.id;
+  selectedJoint = null;
+  renderAll();
+  persistLocal();
+  showToast('已複製人物與姿勢');
+}
+
+function transformSelectedFigure(action: string): void {
+  if (action === 'duplicate') { duplicateFigure(); return; }
+  const figure = selectedFigure();
+  if (!figure || figure.locked) return;
+  commit();
+  if (action === 'mirror') mirrorFigure(figure);
+  else applyFigureTransform(figure, action);
+  selectedJoint = null;
+  renderAll();
+  persistLocal();
+  showToast('已調整人物');
+}
+
+function boneLengthKey(startName: JointName, endName: JointName): string {
+  return `${startName}:${endName}`;
+}
+
+function captureBoneLengths(figure: Figure): Record<string, number> {
+  return Object.fromEntries(BONE_PAIRS.map(([startName, endName]) => [
+    boneLengthKey(startName, endName),
+    Math.hypot(figure.joints[endName].x - figure.joints[startName].x, figure.joints[endName].y - figure.joints[startName].y),
+  ]));
+}
+
+function enforceBoneLengths(figure: Figure, anchorName: JointName, target: Point, lengths: Record<string, number>): void {
+  for (let iteration = 0; iteration < 6; iteration += 1) {
+    figure.joints[anchorName] = { ...target };
+    for (const [startName, endName] of BONE_PAIRS) {
+      const desired = lengths[boneLengthKey(startName, endName)];
+      if (!finiteNumber(desired) || desired <= 0) continue;
+      const start = figure.joints[startName];
+      const end = figure.joints[endName];
+      let dx = end.x - start.x;
+      let dy = end.y - start.y;
+      const current = Math.hypot(dx, dy);
+      if (current < 0.0001) { dx = 1; dy = 0; }
+      else { dx /= current; dy /= current; }
+      if (startName === anchorName) {
+        figure.joints[endName] = { x: start.x + dx * desired, y: start.y + dy * desired };
+      } else if (endName === anchorName) {
+        figure.joints[startName] = { x: end.x - dx * desired, y: end.y - dy * desired };
+      } else {
+        const correction = (desired - current) * 0.5;
+        figure.joints[startName] = { x: start.x - dx * correction, y: start.y - dy * correction };
+        figure.joints[endName] = { x: end.x + dx * correction, y: end.y + dy * correction };
+      }
+    }
+  }
+  figure.joints[anchorName] = { ...target };
+}
+
 function addFigure(): void {
   commit();
   const index = project.figures.length;
@@ -731,51 +1050,15 @@ function addFigure(): void {
 function applyTemplate(template: string): void {
   const figure = selectedFigure();
   if (!figure || figure.locked) return;
+  const base = createTemplateJoints(template);
+  if (!base || !isFigurePose(template)) return;
   commit();
-  const base = createBaseJoints();
-  const pose = template as FigurePose;
-  setFigurePose(figure, pose);
+  setFigurePose(figure, template);
   if (template !== 'lying' && template !== 'prone') {
-    figure.orientation = 'front';
+    figure.cameraView = 'front';
     figure.headFacing = 'right';
   }
-  if (template === 'walk') {
-    base.wristL = { x: 0.33, y: 0.39 }; base.elbowL = { x: 0.4, y: 0.34 };
-    base.wristR = { x: 0.69, y: 0.56 }; base.elbowR = { x: 0.63, y: 0.4 };
-    base.kneeL = { x: 0.53, y: 0.68 }; base.ankleL = { x: 0.67, y: 0.86 }; base.toeL = { x: 0.73, y: 0.87 };
-    base.kneeR = { x: 0.49, y: 0.72 }; base.ankleR = { x: 0.32, y: 0.87 }; base.toeR = { x: 0.25, y: 0.88 };
-  } else if (template === 'sit') {
-    base.pelvis = { x: 0.5, y: 0.5 }; base.hipL = { x: 0.45, y: 0.53 }; base.hipR = { x: 0.55, y: 0.53 };
-    base.kneeL = { x: 0.64, y: 0.61 }; base.ankleL = { x: 0.75, y: 0.75 }; base.toeL = { x: 0.8, y: 0.75 };
-    base.kneeR = { x: 0.39, y: 0.61 }; base.ankleR = { x: 0.27, y: 0.75 }; base.toeR = { x: 0.22, y: 0.75 };
-    base.wristL = { x: 0.34, y: 0.46 }; base.wristR = { x: 0.66, y: 0.46 };
-  } else if (template === 'raise') {
-    base.elbowL = { x: 0.34, y: 0.24 }; base.wristL = { x: 0.28, y: 0.12 };
-    base.elbowR = { x: 0.66, y: 0.24 }; base.wristR = { x: 0.72, y: 0.12 };
-  } else if (template === 'lying') {
-    base.head = { x: 0.13, y: 0.46 }; base.neck = { x: 0.22, y: 0.5 };
-    base.shoulderL = { x: 0.27, y: 0.45 }; base.shoulderR = { x: 0.27, y: 0.55 };
-    base.elbowL = { x: 0.34, y: 0.34 }; base.wristL = { x: 0.45, y: 0.34 };
-    base.elbowR = { x: 0.34, y: 0.66 }; base.wristR = { x: 0.45, y: 0.66 };
-    base.pelvis = { x: 0.62, y: 0.5 }; base.hipL = { x: 0.66, y: 0.45 }; base.hipR = { x: 0.66, y: 0.55 };
-    base.kneeL = { x: 0.75, y: 0.4 }; base.ankleL = { x: 0.87, y: 0.4 }; base.toeL = { x: 0.94, y: 0.36 };
-    base.kneeR = { x: 0.75, y: 0.6 }; base.ankleR = { x: 0.87, y: 0.6 }; base.toeR = { x: 0.94, y: 0.65 };
-  } else if (template === 'prone') {
-    base.head = { x: 0.13, y: 0.54 }; base.neck = { x: 0.22, y: 0.5 };
-    base.shoulderL = { x: 0.27, y: 0.46 }; base.shoulderR = { x: 0.27, y: 0.54 };
-    base.elbowL = { x: 0.2, y: 0.37 }; base.wristL = { x: 0.11, y: 0.37 };
-    base.elbowR = { x: 0.2, y: 0.63 }; base.wristR = { x: 0.11, y: 0.63 };
-    base.pelvis = { x: 0.62, y: 0.5 }; base.hipL = { x: 0.66, y: 0.45 }; base.hipR = { x: 0.66, y: 0.55 };
-    base.kneeL = { x: 0.75, y: 0.43 }; base.ankleL = { x: 0.87, y: 0.43 }; base.toeL = { x: 0.94, y: 0.39 };
-    base.kneeR = { x: 0.75, y: 0.57 }; base.ankleR = { x: 0.87, y: 0.57 }; base.toeR = { x: 0.94, y: 0.61 };
-  } else if (template === 'jump') {
-    base.head = { x: 0.5, y: 0.14 }; base.neck = { x: 0.5, y: 0.24 };
-    base.elbowL = { x: 0.34, y: 0.2 }; base.wristL = { x: 0.24, y: 0.11 };
-    base.elbowR = { x: 0.66, y: 0.2 }; base.wristR = { x: 0.76, y: 0.11 };
-    base.kneeL = { x: 0.38, y: 0.64 }; base.ankleL = { x: 0.3, y: 0.75 }; base.toeL = { x: 0.23, y: 0.71 };
-    base.kneeR = { x: 0.62, y: 0.64 }; base.ankleR = { x: 0.7, y: 0.75 }; base.toeR = { x: 0.77, y: 0.71 };
-  }
-  figure.joints = base;
+  figure.joints = placeTemplateAtFigure(base, figure);
   selectedJoint = null;
   renderAll();
   persistLocal();
@@ -790,18 +1073,46 @@ function downloadBlob(blob: Blob, filename: string): void {
 }
 
 function exportProject(): void {
+  normalizeFigureMetadata();
   const blob = new Blob([JSON.stringify(project, null, 2)], { type: 'application/json' });
   downloadBlob(blob, 'posesketch-project.stickpose.json');
   setStatus('專案已匯出');
 }
 
+function exportPoseJson(): void {
+  const payload = {
+    format: 'posesketch-pose',
+    version: 2,
+    canvas: { width: project.canvas.width, height: project.canvas.height },
+    figures: project.figures.map((figure) => {
+      const cameraView = isCameraView(figure.cameraView) ? figure.cameraView : 'front';
+      return {
+        id: figure.id,
+        name: figure.name,
+        visible: figure.visible,
+        pose: figure.pose ?? 'stand',
+        cameraView,
+        orientation: cameraView === 'front' || cameraView === 'back' ? cameraView : 'side',
+        headFacing: figure.headFacing ?? 'right',
+        keypoints: JOINT_NAMES.map((name) => ({ name, x: figure.joints[name].x, y: figure.joints[name].y, visibility: figure.visible ? 1 : 0 })),
+      };
+    }),
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  downloadBlob(blob, 'posesketch-pose.json');
+  setStatus('Pose JSON 已匯出');
+}
+
 function renderExport(options: DrawOptions, filename: string): void {
   const exportCanvas = document.createElement('canvas');
-  exportCanvas.width = 1024; exportCanvas.height = 1024;
+  const scale = exportResolution / 1024;
+  const width = Math.max(1, Math.round(project.canvas.width * scale));
+  const height = Math.max(1, Math.round(project.canvas.height * scale));
+  exportCanvas.width = width; exportCanvas.height = height;
   const exportContext = exportCanvas.getContext('2d')!;
-  drawScene(exportContext, 1024, 1024, options);
+  drawScene(exportContext, width, height, options);
   exportCanvas.toBlob((blob) => { if (blob) downloadBlob(blob, filename); }, 'image/png');
-  showToast('正在準備 PNG…');
+  showToast(`正在準備 ${width} × ${height} PNG…`);
 }
 
 function loadBackground(dataUrl: string): void {
@@ -814,8 +1125,7 @@ function handleFileOpen(file: File): void {
   const reader = new FileReader();
   reader.onload = () => {
     try {
-      const loaded = JSON.parse(String(reader.result)) as PoseProject;
-      if (loaded.schemaVersion !== 1 || !Array.isArray(loaded.figures)) throw new Error('invalid');
+      const loaded = migrateProject(JSON.parse(String(reader.result)));
       commit();
       Object.assign(project, loaded);
       normalizeFigureMetadata();
@@ -853,7 +1163,9 @@ document.addEventListener('click', (event) => {
   else if (action === 'background') document.querySelector<HTMLInputElement>('#background-input')?.click();
   else if (action === 'export-pose') renderExport({ showGrid: false, showHandles: false, includeBackground: false, aiMode: true }, 'posesketch-ai-pose.png');
   else if (action === 'export-reference') renderExport({ showGrid: false, showHandles: false, includeBackground: false }, 'posesketch-reference.png');
-  else if (action === 'export-json') exportProject();
+  else if (action === 'export-pose-reference') renderExport({ showGrid: false, showHandles: false, includeBackground: false, aiMode: true }, 'posesketch-ai-pose.png');
+  else if (action === 'export-json') exportPoseJson();
+  else if (action === 'export-project-json') exportProject();
   else if (action === 'zoom-in') { zoom = Math.min(1.8, zoom + 0.1); resizeCanvas(); }
   else if (action === 'zoom-out') { zoom = Math.max(0.6, zoom - 0.1); resizeCanvas(); }
 
@@ -863,6 +1175,8 @@ document.addEventListener('click', (event) => {
   if (visibility) { const figure = project.figures.find((item) => item.id === visibility.dataset.toggleVisibility); if (figure) { commit(); figure.visible = !figure.visible; renderAll(); persistLocal(); } }
   const template = target.closest<HTMLElement>('[data-template]')?.dataset.template;
   if (template) applyTemplate(template);
+  const transform = target.closest<HTMLElement>('[data-transform]')?.dataset.transform;
+  if (transform) transformSelectedFigure(transform);
   const aspect = target.closest<HTMLElement>('[data-aspect]')?.dataset.aspect;
   if (aspect) setAspect(aspect);
 });
@@ -870,6 +1184,11 @@ document.addEventListener('click', (event) => {
 document.querySelector<HTMLInputElement>('#background-color')?.addEventListener('input', (event) => {
   project.canvas.backgroundColor = (event.target as HTMLInputElement).value;
   renderAll(); persistLocal();
+});
+
+document.querySelector<HTMLSelectElement>('#export-resolution')?.addEventListener('change', (event) => {
+  const next = Number((event.target as HTMLSelectElement).value);
+  if (Number.isFinite(next) && next > 0) exportResolution = next;
 });
 
 document.querySelector<HTMLInputElement>('#background-input')?.addEventListener('change', (event) => {
@@ -891,7 +1210,7 @@ canvas.addEventListener('pointerdown', (event) => {
   const point = fromPointer(event);
   const figure = selectedFigure();
   const hit = hitTest(point);
-  if (hit && figure) { dragStart = clone(project); dragMoved = false; selectedJoint = hit; renderAll(); return; }
+  if (hit && figure) { dragStart = clone(project); dragBoneLengths = figure.boneLock ? captureBoneLengths(figure) : null; dragMoved = false; selectedJoint = hit; renderAll(); return; }
   selectedJoint = null;
   renderAll();
 });
@@ -901,14 +1220,15 @@ canvas.addEventListener('pointermove', (event) => {
   const figure = selectedFigure();
   if (!figure || figure.locked) return;
   const point = fromPointer(event);
-  figure.joints[selectedJoint] = point;
+  if (figure.boneLock && dragBoneLengths) enforceBoneLengths(figure, selectedJoint, point, dragBoneLengths);
+  else figure.joints[selectedJoint] = point;
   dragMoved = true;
   resizeCanvas();
 });
 
 function endDrag(): void {
   if (dragStart && dragMoved) { historyPast.push(dragStart); if (historyPast.length > 100) historyPast.shift(); historyFuture = []; setStatus('尚未儲存的變更'); persistLocal(); }
-  dragStart = null; dragMoved = false;
+  dragStart = null; dragBoneLengths = null; dragMoved = false;
 }
 canvas.addEventListener('pointerup', endDrag);
 canvas.addEventListener('pointercancel', endDrag);
@@ -923,6 +1243,7 @@ document.addEventListener('keydown', (event) => {
 });
 
 window.addEventListener('resize', resizeCanvas);
-restoreLocal();
-if (project.background?.dataUrl) loadBackground(project.background.dataUrl);
-renderAll();
+void restoreLocal().then(() => {
+  if (project.background?.dataUrl) loadBackground(project.background.dataUrl);
+  renderAll();
+});
