@@ -19,7 +19,7 @@ export type JointName =
 
 export type Point = { x: number; y: number };
 export type Joints = Record<JointName, Point>;
-export type FigureOrientation = 'front' | 'back' | 'side';
+export type CameraView = 'front' | 'back' | 'left-side' | 'right-side';
 export type FigurePose = 'stand' | 'walk' | 'sit' | 'raise' | 'lying' | 'prone' | 'jump';
 export type HeadFacing = 'left' | 'right' | 'up' | 'down';
 
@@ -27,7 +27,7 @@ export type Figure = {
   id: string;
   name: string;
   joints: Joints;
-  orientation: FigureOrientation;
+  cameraView: CameraView;
   pose: FigurePose;
   headFacing: HeadFacing;
   boneLock: boolean;
@@ -44,11 +44,24 @@ export type BackgroundLayer = {
 };
 
 export type PoseProject = {
-  schemaVersion: 2;
+  schemaVersion: 3;
   canvas: { width: number; height: number; backgroundColor: string };
   figures: Figure[];
   background?: BackgroundLayer;
 };
+
+export const CAMERA_VIEWS: CameraView[] = ['front', 'back', 'left-side', 'right-side'];
+
+export const cameraViewLabels: Record<CameraView, { short: string; title: string; surface: string }> = {
+  front: { short: 'F', title: 'FRONT', surface: 'CHEST' },
+  back: { short: 'B', title: 'BACK', surface: 'SPINE' },
+  'left-side': { short: 'L', title: 'LEFT SIDE', surface: 'LEFT BODY' },
+  'right-side': { short: 'R', title: 'RIGHT SIDE', surface: 'RIGHT BODY' },
+};
+
+export function isCameraView(value: unknown): value is CameraView {
+  return typeof value === 'string' && CAMERA_VIEWS.includes(value as CameraView);
+}
 
 export const JOINT_NAMES: JointName[] = [
   'head', 'neck', 'shoulderL', 'elbowL', 'wristL', 'shoulderR', 'elbowR', 'wristR',

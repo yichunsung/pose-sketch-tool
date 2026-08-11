@@ -16,7 +16,7 @@
 - 可拖曳主要關節：頭、頸、肩膀、手肘、手腕、骨盆、膝蓋、腳踝、腳趾。
 - 左右肢體使用不同顏色，方便 AI 及使用者辨識左右側。
 - 已加入可設定的臉部方向箭頭（左／右／上／下）。
-- 已加入身體朝向設定（正面／背面／側面）與 AI 匯出圖的 F/B/S 標記。
+- 已將身體朝向改為四向「鏡頭拍攝方向」：正面、背面、人物左側、人物右側；Inspector 使用預覽卡，Canvas 與 AI 匯出圖顯示相機、拍攝箭頭與 F/B/L/R 標記。
 - 已加入躺下、趴下、跳動三個姿勢範本；AI 匯出圖會補上 FACE UP、FACE DOWN、AIRBORNE、接地線與動勢箭頭。
 - 已加入人物整體位移、縮放、旋轉、左右鏡像與複製姿勢控制。
 - 已加入可選的骨長鎖定拖曳，避免調整關節時骨架長度任意變形。
@@ -25,7 +25,7 @@
 - 可調整畫布背景色與畫布比例：1:1、3:4、16:9。
 - 可匯入背景圖片，作為描姿勢的參考。
 - 已實作復原／重做、瀏覽器 localStorage metadata 自動保存，以及 IndexedDB 背景圖片保存。
-- 已實作 schemaVersion 2 專案 JSON 匯出／匯入，並支援舊版專案遷移。
+- 已實作 schemaVersion 3 專案 JSON 匯出／匯入，並支援 schemaVersion 1／2 舊版專案遷移；舊 `side` 會轉成 `left-side`。
 - 已實作一般參考 PNG、AI Pose PNG 與標準化 Pose JSON 匯出。
 - PNG 匯出會依 1:1、3:4、16:9 畫布比例輸出，並可選 1024／1536／2048 px 寬度。
 - 已抽出 `src/pose-types.ts` 與 `src/templates.ts`，並加入 `npm run check:pose` 匯出格式檢查。
@@ -87,7 +87,7 @@ npm run check:pose -- /path/to/posesketch-pose.json
 - Canvas 初始姿勢可正常渲染。
 - 以瀏覽器控制測試過關節拖曳事件，事件有完成執行。
 - 實測 16:9 + 1536 px 輸出為 1536 × 864 PNG。
-- 實測舊版 localStorage 專案可遷移至 schemaVersion 2。
+- 實測舊版 localStorage 專案可遷移；目前目標 schemaVersion 為 3。
 - 實測範本套用會保留骨盆位置，整體位移與鏡像會反映在 Pose JSON。
 - 實測標準 Pose JSON 通過 `npm run check:pose`。
 

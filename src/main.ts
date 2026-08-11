@@ -1,11 +1,14 @@
 import './styles.css';
 import {
   BONE_PAIRS,
+  CAMERA_VIEWS,
   JOINT_NAMES,
+  cameraViewLabels,
+  isCameraView,
   poseLabels,
   type BackgroundLayer,
+  type CameraView,
   type Figure,
-  type FigureOrientation,
   type FigurePose,
   type HeadFacing,
   type JointName,
@@ -25,6 +28,13 @@ type DrawOptions = {
 const leftColor = '#f06a5f';
 const rightColor = '#4b8fe8';
 const centerColor = '#27333f';
+const cameraColor = '#d9902f';
+const cameraViewUiLabels: Record<CameraView, { title: string; detail: string; surface: string }> = {
+  front: { title: '拍正面', detail: '鏡頭看到胸口', surface: '胸' },
+  back: { title: '拍背面', detail: '鏡頭看到背部', surface: '背' },
+  'left-side': { title: '拍左側', detail: '鏡頭看到人物左側', surface: '左' },
+  'right-side': { title: '拍右側', detail: '鏡頭看到人物右側', surface: '右' },
+};
 const appRoot = document.querySelector<HTMLDivElement>('#app')!;
 
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
@@ -34,7 +44,7 @@ function createFigure(index = 0, offsetX = 0, offsetY = 0, scale = 1): Figure {
     id: crypto.randomUUID(),
     name: `人物 ${index + 1}`,
     joints: createBaseJoints(offsetX, offsetY, scale),
-    orientation: 'front',
+    cameraView: 'front',
     pose: 'stand',
     headFacing: 'right',
     boneLock: false,
@@ -47,7 +57,7 @@ function createFigure(index = 0, offsetX = 0, offsetY = 0, scale = 1): Figure {
 
 function createDefaultProject(): PoseProject {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     canvas: { width: 1024, height: 1024, backgroundColor: '#fbfaf7' },
     figures: [createFigure(0)],
   };
@@ -220,7 +230,7 @@ function readPoint(value: unknown): Point | null {
 function migrateProject(raw: unknown): PoseProject {
   const record = asRecord(raw);
   const schemaVersion = record?.schemaVersion;
-  if (!record || (schemaVersion !== 1 && schemaVersion !== 2) || !Array.isArray(record.figures)) {
+  if (!record || (schemaVersion !== 1 && schemaVersion !== 2 && schemaVersion !== 3) || !Array.isArray(record.figures)) {
     throw new Error('invalid-project');
   }
 
@@ -241,7 +251,14 @@ function migrateProject(raw: unknown): PoseProject {
     }
 
     const defaults = createFigure(index);
-    const orientation = figureRecord.orientation === 'back' || figureRecord.orientation === 'side' ? figureRecord.orientation : 'front';
+    const legacyOrientation = figureRecord.orientation;
+    const cameraView: CameraView = isCameraView(figureRecord.cameraView)
+      ? figureRecord.cameraView
+      : legacyOrientation === 'back'
+        ? 'back'
+        : legacyOrientation === 'side'
+          ? 'left-side'
+          : 'front';
     const pose = figureRecord.pose === 'walk' || figureRecord.pose === 'sit' || figureRecord.pose === 'raise' || figureRecord.pose === 'lying' || figureRecord.pose === 'prone' || figureRecord.pose === 'jump' ? figureRecord.pose : 'stand';
     const headFacing = figureRecord.headFacing === 'left' || figureRecord.headFacing === 'up' || figureRecord.headFacing === 'down' ? figureRecord.headFacing : 'right';
     return {
@@ -249,7 +266,7 @@ function migrateProject(raw: unknown): PoseProject {
       id: typeof figureRecord.id === 'string' && figureRecord.id ? figureRecord.id : defaults.id,
       name: typeof figureRecord.name === 'string' && figureRecord.name ? figureRecord.name : defaults.name,
       joints,
-      orientation,
+      cameraView,
       pose,
       headFacing,
       boneLock: typeof figureRecord.boneLock === 'boolean' ? figureRecord.boneLock : false,
@@ -270,7 +287,7 @@ function migrateProject(raw: unknown): PoseProject {
     : undefined;
 
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     canvas: { width, height, backgroundColor },
     figures,
     ...(background ? { background } : {}),
@@ -279,18 +296,18 @@ function migrateProject(raw: unknown): PoseProject {
 
 function normalizeFigureMetadata(): void {
   project.figures.forEach((figure) => {
-    figure.orientation = figure.orientation ?? 'front';
+    figure.cameraView = isCameraView(figure.cameraView) ? figure.cameraView : 'front';
     figure.pose = figure.pose ?? 'stand';
     figure.headFacing = figure.headFacing ?? 'right';
     figure.boneLock = figure.boneLock ?? false;
   });
-  project.schemaVersion = 2;
+  project.schemaVersion = 3;
 }
 
 function setFigurePose(figure: Figure, pose: FigurePose): void {
   figure.pose = pose;
   if (pose === 'lying' || pose === 'prone') {
-    figure.orientation = 'side';
+    figure.cameraView = 'left-side';
     figure.headFacing = 'left';
   }
 }
@@ -531,7 +548,109 @@ function drawAiPoseCue(context: CanvasRenderingContext2D, figure: Figure, point:
   context.restore();
 }
 
-function drawAiOrientationCue(context: CanvasRenderingContext2D, figure: Figure, point: (joint: JointName) => Point, width: number): void {
+function drawCameraIcon(context: CanvasRenderingContext2D, center: Point, size: number, color: string): void {
+  const bodyWidth = size * 1.55;
+  const bodyHeight = size * 0.95;
+  context.save();
+  context.strokeStyle = color;
+  context.fillStyle = color;
+  context.lineWidth = Math.max(2, size * 0.14);
+  context.lineJoin = 'round';
+  context.strokeRect(center.x - bodyWidth / 2, center.y - bodyHeight / 2, bodyWidth, bodyHeight);
+  context.beginPath();
+  context.arc(center.x, center.y, size * 0.25, 0, Math.PI * 2);
+  context.stroke();
+  context.fillRect(center.x - bodyWidth * 0.28, center.y - bodyHeight * 0.75, bodyWidth * 0.38, bodyHeight * 0.25);
+  context.restore();
+}
+
+function drawCameraDirectionCue(
+  context: CanvasRenderingContext2D,
+  figure: Figure,
+  point: (joint: JointName) => Point,
+  width: number,
+  height: number,
+  aiMode: boolean,
+): void {
+  const view = isCameraView(figure.cameraView) ? figure.cameraView : 'front';
+  const metadata = cameraViewLabels[view];
+  const ui = cameraViewUiLabels[view];
+  const points = JOINT_NAMES.map((jointName) => point(jointName));
+  const minX = Math.min(...points.map(({ x }) => x));
+  const maxX = Math.max(...points.map(({ x }) => x));
+  const minY = Math.min(...points.map(({ y }) => y));
+  const maxY = Math.max(...points.map(({ y }) => y));
+  const shoulderL = point('shoulderL');
+  const shoulderR = point('shoulderR');
+  const pelvis = point('pelvis');
+  const target = {
+    x: (shoulderL.x + shoulderR.x) / 2,
+    y: (shoulderL.y + shoulderR.y) / 2 + (pelvis.y - (shoulderL.y + shoulderR.y) / 2) * 0.24,
+  };
+  const size = Math.max(aiMode ? 14 : 11, width / (aiMode ? 72 : 92));
+  const margin = size * 1.35;
+  const cameraOnRight = view === 'back' || view === 'right-side';
+  const sideView = view === 'left-side' || view === 'right-side';
+  const desiredSideSpace = size * 4.8;
+  const availableSideSpace = cameraOnRight ? width - maxX : minX;
+  let preferredX = cameraOnRight ? maxX + size * 3.2 : minX - size * 3.2;
+  let preferredY = sideView ? target.y : minY - size * 1.9;
+  if (availableSideSpace < desiredSideSpace) {
+    const bottomSpace = height - maxY;
+    const topSpace = minY;
+    if (bottomSpace >= topSpace) {
+      preferredX = cameraOnRight ? maxX - size * 1.2 : minX + size * 1.2;
+      preferredY = maxY + size * 2.9;
+    } else {
+      preferredX = cameraOnRight ? maxX - size * 1.2 : minX + size * 1.2;
+      preferredY = minY - size * 2.9;
+    }
+  }
+  const camera = {
+    x: Math.max(margin, Math.min(width - margin, preferredX)),
+    y: Math.max(margin * 1.25, Math.min(height - margin * 1.25, preferredY)),
+  };
+  const dx = target.x - camera.x;
+  const dy = target.y - camera.y;
+  const length = Math.max(1, Math.hypot(dx, dy));
+  const rayStart = { x: camera.x + dx / length * size, y: camera.y + dy / length * size };
+  const color = aiMode ? '#58d5c8' : cameraColor;
+  const label = aiMode ? `CAMERA ${metadata.title} / ${metadata.surface}` : `鏡頭 ${ui.title}・${ui.surface}`;
+
+  context.save();
+  context.strokeStyle = color;
+  context.fillStyle = color;
+  context.lineWidth = Math.max(2, size * 0.13);
+  context.setLineDash([size * 0.45, size * 0.28]);
+  context.beginPath();
+  context.moveTo(rayStart.x, rayStart.y);
+  context.lineTo(target.x, target.y);
+  context.stroke();
+  context.setLineDash([]);
+  drawArrowHead(context, rayStart, target, color, size * 0.58);
+  drawCameraIcon(context, camera, size, color);
+
+  const fontSize = Math.max(aiMode ? 14 : 10, width / (aiMode ? 70 : 96));
+  context.font = `800 ${fontSize}px -apple-system, BlinkMacSystemFont, sans-serif`;
+  const paddingX = size * 0.42;
+  const badgeWidth = context.measureText(label).width + paddingX * 2;
+  const badgeHeight = fontSize * 1.65;
+  const badgeX = Math.max(size * 0.55, Math.min(width - badgeWidth - size * 0.55, camera.x - badgeWidth / 2));
+  const labelBelowCamera = camera.y >= target.y;
+  const preferredBadgeY = labelBelowCamera ? camera.y + size * 1.05 : camera.y - size * 1.05 - badgeHeight;
+  const badgeY = Math.max(size * 0.55, Math.min(height - badgeHeight - size * 0.55, preferredBadgeY));
+  context.fillStyle = aiMode ? 'rgba(29, 37, 45, .94)' : 'rgba(251, 250, 247, .94)';
+  context.fillRect(badgeX, badgeY, badgeWidth, badgeHeight);
+  context.strokeStyle = color;
+  context.strokeRect(badgeX, badgeY, badgeWidth, badgeHeight);
+  context.fillStyle = color;
+  context.textAlign = 'center';
+  context.textBaseline = 'middle';
+  context.fillText(label, badgeX + badgeWidth / 2, badgeY + badgeHeight / 2);
+  context.restore();
+}
+
+function drawAiCameraSurfaceCue(context: CanvasRenderingContext2D, figure: Figure, point: (joint: JointName) => Point, width: number): void {
   const shoulderL = point('shoulderL');
   const shoulderR = point('shoulderR');
   const pelvis = point('pelvis');
@@ -541,36 +660,39 @@ function drawAiOrientationCue(context: CanvasRenderingContext2D, figure: Figure,
     y: shoulderCenter.y + (pelvis.y - shoulderCenter.y) * 0.22,
   };
   const size = Math.max(16, width / 56);
-  const orientation = figure.orientation ?? 'front';
-  const label = orientation === 'front' ? 'F' : orientation === 'back' ? 'B' : 'S';
+  const cameraView = isCameraView(figure.cameraView) ? figure.cameraView : 'front';
+  const label = cameraViewLabels[cameraView].short;
 
   context.save();
   context.strokeStyle = '#ffd166';
   context.fillStyle = '#ffd166';
   context.lineWidth = Math.max(3, width / 260);
   context.lineCap = 'round';
-  if (orientation === 'front') {
+  if (cameraView === 'front') {
     context.beginPath(); context.arc(chest.x, chest.y, size * 0.72, 0, Math.PI * 2); context.stroke();
     context.beginPath(); context.arc(chest.x, chest.y, size * 0.18, 0, Math.PI * 2); context.fill();
     context.beginPath(); context.moveTo(chest.x - size * 1.15, chest.y); context.lineTo(chest.x + size * 1.15, chest.y); context.stroke();
-  } else if (orientation === 'back') {
+  } else if (cameraView === 'back') {
     context.beginPath(); context.arc(chest.x - size * 0.58, chest.y, size * 0.46, -Math.PI / 2, Math.PI / 2); context.stroke();
     context.beginPath(); context.arc(chest.x + size * 0.58, chest.y, size * 0.46, Math.PI / 2, Math.PI * 1.5); context.stroke();
     context.setLineDash([size * 0.35, size * 0.22]);
     context.beginPath(); context.moveTo(chest.x, chest.y - size * 0.9); context.lineTo(chest.x, chest.y + size * 0.9); context.stroke();
     context.setLineDash([]);
   } else {
+    const direction = cameraView === 'left-side' ? 1 : -1;
     context.beginPath();
-    context.moveTo(chest.x + size, chest.y);
-    context.lineTo(chest.x - size * 0.72, chest.y - size * 0.72);
-    context.lineTo(chest.x - size * 0.72, chest.y + size * 0.72);
+    context.moveTo(chest.x + size * direction, chest.y);
+    context.lineTo(chest.x - size * 0.72 * direction, chest.y - size * 0.72);
+    context.lineTo(chest.x - size * 0.72 * direction, chest.y + size * 0.72);
     context.closePath();
     context.fill();
   }
   context.font = `800 ${Math.max(20, width / 46)}px -apple-system, BlinkMacSystemFont, sans-serif`;
   context.textAlign = 'left';
   context.textBaseline = 'middle';
-  context.fillText(label, chest.x + size * 1.55, chest.y);
+  const labelX = cameraView === 'right-side' ? chest.x - size * 1.55 : chest.x + size * 1.55;
+  context.textAlign = cameraView === 'right-side' ? 'right' : 'left';
+  context.fillText(label, labelX, chest.y);
   context.restore();
 }
 
@@ -583,7 +705,7 @@ function drawAiLegend(context: CanvasRenderingContext2D, width: number): void {
   context.textBaseline = 'top';
   const x = width / 38;
   const y = width / 38;
-  context.fillText('L/R = limb side   F/B/S = torso facing', x, y);
+  context.fillText('CAMERA F/B/L/R = front, back, left side, right side', x, y);
   context.fillText('POSE: LYING face up   PRONE face down   JUMP airborne   arrows = head + toe', x, y + fontSize * 1.45);
   context.restore();
 }
@@ -616,10 +738,13 @@ function drawFigure(context: CanvasRenderingContext2D, figure: Figure, width: nu
   drawHeadDirectionCue(context, head, headRadius, figure.headFacing ?? 'right', Boolean(options.aiMode));
 
   if (options.aiMode) {
-    drawAiOrientationCue(context, figure, point, width);
+    drawCameraDirectionCue(context, figure, point, width, height, true);
+    drawAiCameraSurfaceCue(context, figure, point, width);
     drawAiPoseCue(context, figure, point, width, height);
     drawFootDirectionCue(context, point('ankleL'), point('toeL'), 'L', width);
     drawFootDirectionCue(context, point('ankleR'), point('toeR'), 'R', width);
+  } else if (options.showHandles && isSelected) {
+    drawCameraDirectionCue(context, figure, point, width, height, false);
   }
 
   if (options.showHandles && isSelected) {
@@ -677,6 +802,17 @@ function renderLayers(): void {
 function renderInspector(): void {
   const figure = selectedFigure();
   if (!figure) { inspector.innerHTML = '<p class="muted-copy">尚未選取人物</p>'; return; }
+  const currentCameraView = isCameraView(figure.cameraView) ? figure.cameraView : 'front';
+  const cameraViewCards = CAMERA_VIEWS.map((view) => {
+    const label = cameraViewUiLabels[view];
+    const reverse = view === 'back' || view === 'right-side';
+    return `
+      <button type="button" class="camera-view-card ${currentCameraView === view ? 'active' : ''}" data-camera-view="${view}" role="radio" aria-checked="${currentCameraView === view}" ${figure.locked ? 'disabled' : ''}>
+        <span class="camera-view-visual ${reverse ? 'reverse' : ''}" aria-hidden="true"><i class="mini-camera"></i><i class="mini-camera-ray">→</i><b>${label.surface}</b></span>
+        <strong>${label.title}</strong><small>${label.detail}</small>
+      </button>
+    `;
+  }).join('');
   inspector.innerHTML = `
     <label class="field-label">名稱<input id="figure-name" type="text" value="${escapeAttr(figure.name)}"></label>
     <label class="field-label">姿態<select id="figure-pose">
@@ -688,11 +824,11 @@ function renderInspector(): void {
       <option value="prone" ${(figure.pose ?? 'stand') === 'prone' ? 'selected' : ''}>趴下 PRONE / FACE DOWN</option>
       <option value="jump" ${(figure.pose ?? 'stand') === 'jump' ? 'selected' : ''}>跳動 JUMP / AIRBORNE</option>
     </select></label>
-    <label class="field-label">身體朝向<select id="figure-orientation">
-      <option value="front" ${(figure.orientation ?? 'front') === 'front' ? 'selected' : ''}>正面 FRONT</option>
-      <option value="back" ${(figure.orientation ?? 'front') === 'back' ? 'selected' : ''}>背面 BACK</option>
-      <option value="side" ${(figure.orientation ?? 'front') === 'side' ? 'selected' : ''}>側面 SIDE</option>
-    </select></label>
+    <div class="camera-view-field">
+      <div class="camera-view-heading"><span>鏡頭拍攝方向</span><small>鏡頭會看到人物哪一面</small></div>
+      <div class="camera-view-grid" role="radiogroup" aria-label="鏡頭拍攝方向">${cameraViewCards}</div>
+      <div class="camera-view-summary"><i class="mini-camera"></i><span>${cameraViewUiLabels[currentCameraView].detail}</span></div>
+    </div>
     <label class="field-label">頭部方向<select id="figure-head-facing">
       <option value="left" ${(figure.headFacing ?? 'right') === 'left' ? 'selected' : ''}>左 LEFT</option>
       <option value="right" ${(figure.headFacing ?? 'right') === 'right' ? 'selected' : ''}>右 RIGHT</option>
@@ -712,14 +848,23 @@ function renderInspector(): void {
   `;
   const nameInput = document.querySelector<HTMLInputElement>('#figure-name');
   const poseInput = document.querySelector<HTMLSelectElement>('#figure-pose');
-  const orientationInput = document.querySelector<HTMLSelectElement>('#figure-orientation');
   const headFacingInput = document.querySelector<HTMLSelectElement>('#figure-head-facing');
   const colorInput = document.querySelector<HTMLInputElement>('#figure-color');
   const lockedInput = document.querySelector<HTMLInputElement>('#figure-locked');
   const boneLockInput = document.querySelector<HTMLInputElement>('#figure-bone-lock');
   nameInput?.addEventListener('change', () => { commit(); figure.name = nameInput.value.trim() || '未命名人物'; renderAll(); persistLocal(); });
   poseInput?.addEventListener('change', () => { commit(); setFigurePose(figure, poseInput.value as FigurePose); renderAll(); persistLocal(); });
-  orientationInput?.addEventListener('change', () => { commit(); figure.orientation = orientationInput.value as FigureOrientation; renderAll(); persistLocal(); });
+  inspector.querySelectorAll<HTMLButtonElement>('[data-camera-view]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const nextView = button.dataset.cameraView;
+      if (!isCameraView(nextView) || nextView === figure.cameraView || figure.locked) return;
+      commit();
+      figure.cameraView = nextView;
+      renderAll();
+      persistLocal();
+      showToast(`鏡頭方向：${cameraViewUiLabels[nextView].detail}`);
+    });
+  });
   headFacingInput?.addEventListener('change', () => { commit(); figure.headFacing = headFacingInput.value as HeadFacing; renderAll(); persistLocal(); });
   colorInput?.addEventListener('change', () => { commit(); figure.color = colorInput.value; renderAll(); persistLocal(); });
   lockedInput?.addEventListener('change', () => { commit(); figure.locked = lockedInput.checked; renderAll(); persistLocal(); });
@@ -812,6 +957,8 @@ function mirrorFigure(figure: Figure): void {
   }
   if (figure.headFacing === 'left') figure.headFacing = 'right';
   else if (figure.headFacing === 'right') figure.headFacing = 'left';
+  if (figure.cameraView === 'left-side') figure.cameraView = 'right-side';
+  else if (figure.cameraView === 'right-side') figure.cameraView = 'left-side';
 }
 
 function duplicateFigure(): void {
@@ -908,7 +1055,7 @@ function applyTemplate(template: string): void {
   commit();
   setFigurePose(figure, template);
   if (template !== 'lying' && template !== 'prone') {
-    figure.orientation = 'front';
+    figure.cameraView = 'front';
     figure.headFacing = 'right';
   }
   figure.joints = placeTemplateAtFigure(base, figure);
@@ -935,17 +1082,21 @@ function exportProject(): void {
 function exportPoseJson(): void {
   const payload = {
     format: 'posesketch-pose',
-    version: 1,
+    version: 2,
     canvas: { width: project.canvas.width, height: project.canvas.height },
-    figures: project.figures.map((figure) => ({
-      id: figure.id,
-      name: figure.name,
-      visible: figure.visible,
-      pose: figure.pose ?? 'stand',
-      orientation: figure.orientation ?? 'front',
-      headFacing: figure.headFacing ?? 'right',
-      keypoints: JOINT_NAMES.map((name) => ({ name, x: figure.joints[name].x, y: figure.joints[name].y, visibility: figure.visible ? 1 : 0 })),
-    })),
+    figures: project.figures.map((figure) => {
+      const cameraView = isCameraView(figure.cameraView) ? figure.cameraView : 'front';
+      return {
+        id: figure.id,
+        name: figure.name,
+        visible: figure.visible,
+        pose: figure.pose ?? 'stand',
+        cameraView,
+        orientation: cameraView === 'front' || cameraView === 'back' ? cameraView : 'side',
+        headFacing: figure.headFacing ?? 'right',
+        keypoints: JOINT_NAMES.map((name) => ({ name, x: figure.joints[name].x, y: figure.joints[name].y, visibility: figure.visible ? 1 : 0 })),
+      };
+    }),
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
   downloadBlob(blob, 'posesketch-pose.json');

@@ -21,11 +21,12 @@ const expectedJoints = [
 ];
 const poses = new Set(['stand', 'walk', 'sit', 'raise', 'lying', 'prone', 'jump']);
 const orientations = new Set(['front', 'back', 'side']);
+const cameraViews = new Set(['front', 'back', 'left-side', 'right-side']);
 const headFacings = new Set(['left', 'right', 'up', 'down']);
 const finite = (value) => typeof value === 'number' && Number.isFinite(value);
 
 if (payload?.format !== 'posesketch-pose') errors.push('format must be "posesketch-pose"');
-if (payload?.version !== 1) errors.push('version must be 1');
+if (payload?.version !== 1 && payload?.version !== 2) errors.push('version must be 1 or 2');
 if (!Array.isArray(payload?.figures) || payload.figures.length === 0) errors.push('figures must be a non-empty array');
 
 for (const [index, figure] of (payload?.figures ?? []).entries()) {
@@ -35,7 +36,9 @@ for (const [index, figure] of (payload?.figures ?? []).entries()) {
   }
   if (typeof figure.id !== 'string' || !figure.id) errors.push(`figures[${index}].id is missing`);
   if (!poses.has(figure.pose)) errors.push(`figures[${index}].pose is invalid`);
-  if (!orientations.has(figure.orientation)) errors.push(`figures[${index}].orientation is invalid`);
+  if (payload.version === 1 && !orientations.has(figure.orientation)) errors.push(`figures[${index}].orientation is invalid`);
+  if (payload.version === 2 && !cameraViews.has(figure.cameraView)) errors.push(`figures[${index}].cameraView is invalid`);
+  if (payload.version === 2 && figure.orientation !== undefined && !orientations.has(figure.orientation)) errors.push(`figures[${index}].orientation compatibility value is invalid`);
   if (!headFacings.has(figure.headFacing)) errors.push(`figures[${index}].headFacing is invalid`);
   if (typeof figure.visible !== 'boolean') errors.push(`figures[${index}].visible is invalid`);
   if (!Array.isArray(figure.keypoints)) {
